@@ -1,0 +1,56 @@
+# Local test topology. Mirrors the Railway service graph:
+#   db        -> PostgreSQL (own volume, private)
+#   omnigent  -> Omnigent server (wrapper image; admin seeded at start-up), data volume, public
+name: omnigent-railway-test
+
+networks:
+  default:
+    name: omnigent-railway-test
+
+services:
+  db:
+    image: postgres:18.2-alpine3.23@sha256:035b9ab53cfa147d7202b61f5f7782b939ae815b7d6bc81c96b7b42ff1fca950
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: omnigent
+      POSTGRES_PASSWORD: local-test-only-postgres-password
+      POSTGRES_DB: omnigent
+    volumes:
+      - pg:/var/lib/postgresql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U omnigent -d omnigent']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  omnigent:
+    build:
+      context: .
+      dockerfile: images/omnigent/Dockerfile
+      args:
+        WRAPPER_VERSION: ${WRAPPER_VERSION:-0.0.0-local}
+        VCS_REF: ${VCS_REF:-local}
+    image: ${OMNIGENT_RAILWAY_IMAGE:-omnigent-railway:local}
+    restart: unless-stopped
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      DATABASE_URL: postgres://omnigent:local-test-only-postgres-password@db:5432/omnigent
+      OMNIGENT_AUTH_PROVIDER: accounts
+      OMNIGENT_ACCOUNTS_AUTO_OPEN: '0'
+      OMNIGENT_ACCOUNTS_INIT_ADMIN_USERNAME: ${OMNIGENT_TEST_ADMIN_USERNAME:-admin}
+      OMNIGENT_ACCOUNTS_INIT_ADMIN_PASSWORD: ${OMNIGENT_TEST_ADMIN_PASSWORD:-local-test-only-admin-password}
+      OMNIGENT_ACCOUNTS_COOKIE_SECRET: '00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff'
+      OMNIGENT_ACCOUNTS_BASE_URL: http://localhost:${OMNIGENT_TEST_PORT:-18080}
+      ARTIFACT_DIR: /data/artifacts
+      OMNIGENT_ADMIN_CREDENTIALS_PATH: /data/admin-credentials
+      HOST: 0.0.0.0
+      PORT: '8000'
+    ports:
+      - '127.0.0.1:${OMNIGENT_TEST_PORT:-18080}:8000'
+    volumes:
+      - data:/data
+
+volumes:
+  pg:
+  data:
